@@ -1,0 +1,4 @@
+KPI Ventas mensuales: ver 'kpi_ventas_mensuales.png'
+KPI Completitud retail (filas sin NaN): 100.00%
+KPI Integridad referencial (retail->customers): 100.00%
+KPI Distribución de género: ver 'dist_genero_clientes.png'
