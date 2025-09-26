@@ -292,51 +292,159 @@ def policies_retail_output(validator, customers_clean=None):
 def visuals_and_kpis(customers: pd.DataFrame, retail: pd.DataFrame, out_dir="outputs"):
     os.makedirs(out_dir, exist_ok=True)
 
-    # KPI 1: Ventas mensuales
-    if {"purchase_date", "amount"}.issubset(retail.columns):
-        r = retail.copy()
+    # ==== Preparación y helpers ====
+    r = retail.copy()
+    c = customers.copy()
+
+    # Campos clave para "validez financiera"
+    required_cols = [col for col in ["transaction_id", "purchase_date", "amount", "customer_id"] if col in r.columns]
+    n_total = len(r)
+
+    # ------------------------------
+    # a) Ensure Financial Integrity
+    # ------------------------------
+    kpi_fin_integrity = None
+    if n_total > 0 and set(["purchase_date", "amount", "customer_id"]).issubset(r.columns):
+        # inválida si hay NaN en requeridas o amount < 0
+        invalid_mask = r[required_cols].isna().any(axis=1)
+        if "amount" in r.columns:
+            invalid_mask |= (r["amount"] < 0)
+        n_invalid = int(invalid_mask.sum())
+        n_valid = int(n_total - n_invalid)
+        kpi_fin_integrity = (n_valid / n_total) * 100
+
+        plt.figure()
+        plt.bar(["Válidas", "Inválidas"], [n_valid, n_invalid])
+        plt.title("Integridad financiera: transacciones válidas vs inválidas")
+        plt.ylabel("Cantidad de transacciones")
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, "a_integridad_financiera.png"))
+        plt.close()
+
+    # -----------------------------------------
+    # b) Support Strategic Planning (ventas mes)
+    # -----------------------------------------
+    kpi_sales_total = None
+    if {"purchase_date", "amount"}.issubset(r.columns) and len(r) > 0:
         r["month"] = r["purchase_date"].dt.to_period("M")
         monthly = r.groupby("month")["amount"].sum().sort_index()
+        kpi_sales_total = float(monthly.sum())
+
         plt.figure()
         monthly.plot(kind="bar", title="Ventas mensuales (monto total)")
         plt.ylabel("Monto")
         plt.tight_layout()
-        plt.savefig(os.path.join(out_dir, "kpi_ventas_mensuales.png"))
+        plt.savefig(os.path.join(out_dir, "b_ventas_mensuales.png"))
         plt.close()
 
-    # KPI 2: % transacciones con cliente válido (FK cumple)
+    # ----------------------------------------------------
+    # c) Strengthening Customer & Product Insights (Top-5)
+    # ----------------------------------------------------
+    kpi_top_cat = None
+    if "product_category" in r.columns and "amount" in r.columns:
+        top_cat = r.groupby("product_category")["amount"].sum().sort_values(ascending=False).head(5)
+        if len(top_cat) > 0:
+            kpi_top_cat = top_cat.index.tolist()
+
+            plt.figure()
+            top_cat.sort_values().plot(kind="barh", title="Top 5 categorías por ventas (monto)")
+            plt.xlabel("Monto")
+            plt.tight_layout()
+            plt.savefig(os.path.join(out_dir, "c_top_categorias.png"))
+            plt.close()
+
+    # (extra insight cliente) Ventas por género
+    if {"customer_id", "amount"}.issubset(r.columns) and {"id", "gender"}.issubset(c.columns):
+        merged = r.merge(c[["id", "gender"]].rename(columns={"id": "customer_id"}),
+                         on="customer_id", how="left")
+        if "gender" in merged.columns:
+            plt.figure()
+            merged.groupby("gender")["amount"].sum().sort_values(ascending=False).plot(
+                kind="bar", title="Ventas por género"
+            )
+            plt.ylabel("Monto total")
+            plt.tight_layout()
+            plt.savefig(os.path.join(out_dir, "c_ventas_por_genero.png"))
+            plt.close()
+
+    # ------------------------------------------------------
+    # d) Transparent & Defensible Reporting (FK compliance)
+    # ------------------------------------------------------
     kpi_fk = None
-    if {"customer_id"}.issubset(retail.columns) and {"id"}.issubset(customers.columns):
-        valid_ids = set(customers["id"].astype(str).str.strip())
-        fk_ok = retail["customer_id"].astype(str).str.strip().isin(valid_ids).mean() * 100
-        kpi_fk = fk_ok
+    if {"customer_id"}.issubset(r.columns) and {"id"}.issubset(c.columns):
+        valid_ids = set(c["id"].astype(str).str.strip())
+        fk_ratio = r["customer_id"].astype(str).str.strip().isin(valid_ids).mean() * 100
+        kpi_fk = fk_ratio
 
-    # KPI 3: Distribución de género clientes
-    if "gender" in customers.columns:
-        g = customers["gender"].value_counts(dropna=False).sort_index()
         plt.figure()
-        g.plot(kind="bar", title="Distribución de género (clientes)")
-        plt.ylabel("Cantidad de clientes")
+        plt.pie([fk_ratio, 100 - fk_ratio],
+                labels=["Válidas", "No válidas"], autopct="%1.1f%%", startangle=90)
+        plt.title("Integridad referencial (FK clientes)")
         plt.tight_layout()
-        plt.savefig(os.path.join(out_dir, "dist_genero_clientes.png"))
+        plt.savefig(os.path.join(out_dir, "d_integridad_fk.png"))
         plt.close()
 
-    with open(os.path.join(out_dir, "kpis.txt"), "w", encoding="utf-8") as f:
-        if {"purchase_date", "amount"}.issubset(retail.columns):
-            completeness = (1 - retail.isnull().any(axis=1).mean()) * 100
-            f.write(f"KPI Ventas mensuales: ver 'kpi_ventas_mensuales.png'\n")
-            f.write(f"KPI Completitud retail (filas sin NaN): {completeness:.2f}%\n")
-        if kpi_fk is not None:
-            f.write(f"KPI Integridad referencial (retail->customers): {kpi_fk:.2f}%\n")
-        if "gender" in customers.columns:
-            f.write("KPI Distribución de género: ver 'dist_genero_clientes.png'\n")
+    # (se mantiene tu distribución de género de clientes)
+    if "gender" in c.columns:
+        g = c["gender"].value_counts(dropna=False).sort_index()
+        if len(g) > 0:
+            plt.figure()
+            g.plot(kind="bar", title="Distribución de género (clientes)")
+            plt.ylabel("Cantidad de clientes")
+            plt.tight_layout()
+            plt.savefig(os.path.join(out_dir, "dist_genero_clientes.png"))
+            plt.close()
 
-    print_header("KPIs generados")
-    print("-> outputs/kpis.txt")
-    if os.path.exists(os.path.join(out_dir, "kpi_ventas_mensuales.png")):
-        print("-> outputs/kpi_ventas_mensuales.png")
-    if os.path.exists(os.path.join(out_dir, "dist_genero_clientes.png")):
-        print("-> outputs/dist_genero_clientes.png")
+    # ------------------------------
+    # KPIs a archivo de texto
+    # ------------------------------
+    with open(os.path.join(out_dir, "kpis.txt"), "w", encoding="utf-8") as f:
+        f.write("KPIs por objetivo de negocio\n")
+        f.write("=====================================\n")
+
+        if kpi_fin_integrity is not None:
+            f.write(f"a) Integridad financiera (%% válidas): {kpi_fin_integrity:.2f}%  -> a_integridad_financiera.png\n")
+        else:
+            f.write("a) Integridad financiera: N/D\n")
+
+        if kpi_sales_total is not None:
+            f.write(f"b) Ventas totales del período: {kpi_sales_total:,.2f}  -> b_ventas_mensuales.png\n")
+        else:
+            f.write("b) Ventas totales del período: N/D\n")
+
+        if kpi_top_cat is not None:
+            f.write(f"c) Top 5 categorías por ventas: {', '.join(kpi_top_cat)}  -> c_top_categorias.png\n")
+        else:
+            f.write("c) Top 5 categorías por ventas: N/D\n")
+
+        if kpi_fk is not None:
+            f.write(f"d) Integridad referencial (FK válida): {kpi_fk:.2f}%  -> d_integridad_fk.png\n")
+        else:
+            f.write("d) Integridad referencial (FK válida): N/D\n")
+
+        # Métrica de completitud general (como tenías)
+        completeness = (1 - r.isnull().any(axis=1).mean()) * 100 if len(r) else 0.0
+        f.write(f"\nCompletitud retail (filas sin NaN): {completeness:.2f}%\n")
+
+    # ------------------------------
+    # Log de archivos generados
+    # ------------------------------
+    print_header("KPIs y visualizaciones generadas")
+    for fn in [
+        "a_integridad_financiera.png",
+        "b_ventas_mensuales.png",
+        "c_top_categorias.png",
+        "c_ventas_por_genero.png",
+        "d_integridad_fk.png",
+        "dist_genero_clientes.png",
+        "kpis.txt",
+    ]:
+        path = os.path.join(out_dir, fn)
+        if os.path.exists(path):
+            print("->", path)
+
+
+    
 
 # ========================= MAIN =========================
 def main():

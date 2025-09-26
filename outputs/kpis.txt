@@ -1,4 +1,8 @@
-KPI Ventas mensuales: ver 'kpi_ventas_mensuales.png'
-KPI Completitud retail (filas sin NaN): 100.00%
-KPI Integridad referencial (retail->customers): 100.00%
-KPI Distribución de género: ver 'dist_genero_clientes.png'
+KPIs por objetivo de negocio
+=====================================
+a) Integridad financiera (%% válidas): 100.00%  -> a_integridad_financiera.png
+b) Ventas totales del período: 25,311.85  -> b_ventas_mensuales.png
+c) Top 5 categorías por ventas: Electronics, Clothing, Sports, Toys, Home & Kitchen  -> c_top_categorias.png
+d) Integridad referencial (FK válida): 100.00%  -> d_integridad_fk.png
+
+Completitud retail (filas sin NaN): 100.00%
